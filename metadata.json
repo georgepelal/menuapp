@@ -1,0 +1,5 @@
+{
+  "name": "menuapp",
+  "description": "A comprehensive SaaS platform for restaurants, cafes, bars, and hotels to create, manage, and share digital QR menus with AI-powered descriptions and image generation.",
+  "requestFramePermissions": []
+}
