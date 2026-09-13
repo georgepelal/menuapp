@@ -166,6 +166,7 @@ const App: React.FC = () => {
   
   // Landing page language state
   const [landingLang, setLandingLang] = useState<'en' | 'el'>('en');
+  const [isInitializing, setIsInitializing] = useState(true);
 
   // Detect User Location for Language
   useEffect(() => {
@@ -200,6 +201,7 @@ const App: React.FC = () => {
         setView('admin');
       }
     }
+    setIsInitializing(false);
   }, []);
 
   const loadUserData = (email: string) => {
@@ -346,6 +348,17 @@ const App: React.FC = () => {
     setView(mode);
     window.scrollTo(0, 0);
   };
+
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-orange-200 border-t-orange-600"></div>
+          <p className="text-slate-500 font-medium animate-pulse">Loading GourmetQR...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (view === 'super-admin') {
     if (!currentUser || currentUser.email !== 'admin@gourmetqr.com') {

@@ -58,7 +58,8 @@ import {
   ClipboardList,
   ThumbsUp,
   ThumbsDown,
-  Timer
+  Timer,
+  AlertTriangle
 } from 'lucide-react';
 
 export { 
@@ -121,5 +122,6 @@ export {
   ClipboardList,
   ThumbsUp,
   ThumbsDown,
-  Timer
+  Timer,
+  AlertTriangle
 };

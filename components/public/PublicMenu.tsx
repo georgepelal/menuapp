@@ -3,8 +3,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { AppState, MenuItem, DietaryType, ThemeTemplate, DIETARY_CONFIG } from '../../types';
 import { 
   Search, Utensils, ArrowLeft, Share2, Globe, Check, Megaphone, Star, Zap, Activity, X, 
-  ChevronDown, Info, BellRing, Gift, MessageSquare, ThumbsUp, Coffee 
+  ChevronDown, Info, BellRing, Gift, MessageSquare, ThumbsUp, Coffee, AlertTriangle
 } from '../ui/Icons';
+import { ToastContainer, ToastMessage, ToastType } from '../ui/Toast';
 
 interface PublicMenuProps {
   data: AppState;
@@ -91,6 +92,16 @@ const PublicMenu: React.FC<PublicMenuProps> = ({ data, onBack, onInteraction }) 
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [feedbackRating, setFeedbackRating] = useState(0);
   const [feedbackComment, setFeedbackComment] = useState('');
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  const addToast = (type: ToastType, message: string) => {
+    const id = Date.now().toString();
+    setToasts(prev => [...prev, { id, type, message }]);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
   
   const hasViewedRef = useRef(false);
 
@@ -156,7 +167,7 @@ const PublicMenu: React.FC<PublicMenuProps> = ({ data, onBack, onInteraction }) 
       setIsFeedbackOpen(false);
       setFeedbackRating(0);
       setFeedbackComment('');
-      alert(t.feedback.thanks);
+      addToast('success', t.feedback.thanks);
     }
   };
 
@@ -543,47 +554,62 @@ const PublicMenu: React.FC<PublicMenuProps> = ({ data, onBack, onInteraction }) 
           </div>
 
           {/* List */}
-          <div className="max-w-2xl mx-auto px-4 pt-6 space-y-4">
-             {filteredItems.map(item => (
-                <div 
-                  key={item.id} 
-                  onClick={() => handleItemClick(item)}
-                  className={`p-4 rounded-2xl shadow-sm border flex gap-4 relative transition-all active:scale-[0.99] cursor-pointer hover:shadow-md ${
-                     theme === 'dark' 
-                     ? 'bg-slate-900 border-slate-800 hover:border-slate-700' 
-                     : 'bg-white border-gray-100 hover:border-orange-100'
-                  } ${!item.isAvailable ? 'opacity-60' : ''}`}
-                >
-                   <div className="flex-1 flex flex-col justify-between">
-                     <div>
-                       <h3 className={`font-bold text-lg leading-snug mb-1 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-                         {getLocalized(item, 'name')}
-                       </h3>
-                       <p className="text-sm text-slate-500 line-clamp-2 leading-relaxed mb-3">
-                         {getLocalized(item, 'description')}
-                       </p>
-                     </div>
-                     <div className="flex items-center gap-2">
-                       <span className={`font-bold px-2 py-1 rounded-lg text-sm ${theme === 'dark' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-900'}`}>
-                         {formatPrice(item.price)}
-                       </span>
-                       {item.dietary.slice(0, 2).map(d => (
-                         <span key={d} className="text-xs text-green-600 bg-green-50 px-1.5 py-1 rounded-md border border-green-100">
-                           {DIETARY_CONFIG[d as DietaryType]?.icon}
-                         </span>
-                       ))}
-                     </div>
+          <div className="max-w-2xl mx-auto px-4 pt-6 space-y-4 min-h-[50vh]">
+             {filteredItems.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center opacity-60">
+                   <div className="bg-gray-100 p-4 rounded-full mb-4">
+                      <Search size={32} className="text-gray-400" />
                    </div>
-                   
-                   <div className={`w-28 h-28 flex-shrink-0 rounded-xl overflow-hidden relative shadow-inner ${theme === 'dark' ? 'bg-slate-800' : 'bg-gray-100'}`}>
-                     {item.image ? (
-                       <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
-                     ) : (
-                       <div className="w-full h-full flex items-center justify-center text-gray-400"><Utensils size={24} /></div>
-                     )}
-                   </div>
+                   <h3 className="text-lg font-bold text-slate-800">{t.noItems}</h3>
+                   <p className="text-sm text-slate-500">Try selecting a different category or search term.</p>
+                   <button 
+                     onClick={() => { setActiveCategory('all'); setSearchQuery(''); }}
+                     className="mt-4 text-orange-600 font-bold text-sm hover:underline"
+                   >
+                     Clear Filters
+                   </button>
                 </div>
-             ))}
+             ) : (
+                filteredItems.map(item => (
+                 <div 
+                   key={item.id} 
+                   onClick={() => handleItemClick(item)}
+                   className={`p-4 rounded-2xl shadow-sm border flex gap-4 relative transition-all active:scale-[0.99] cursor-pointer hover:shadow-md ${
+                      theme === 'dark' 
+                      ? 'bg-slate-900 border-slate-800 hover:border-slate-700' 
+                      : 'bg-white border-gray-100 hover:border-orange-100'
+                   } ${!item.isAvailable ? 'opacity-60' : ''}`}
+                 >
+                    <div className="flex-1 flex flex-col justify-between">
+                      <div>
+                        <h3 className={`font-bold text-lg leading-snug mb-1 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                          {getLocalized(item, 'name')}
+                        </h3>
+                        <p className="text-sm text-slate-500 line-clamp-2 leading-relaxed mb-3">
+                          {getLocalized(item, 'description')}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`font-bold px-2 py-1 rounded-lg text-sm ${theme === 'dark' ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-900'}`}>
+                          {formatPrice(item.price)}
+                        </span>
+                        {item.dietary.slice(0, 2).map(d => (
+                          <span key={d} className="text-xs text-green-600 bg-green-50 px-1.5 py-1 rounded-md border border-green-100">
+                            {DIETARY_CONFIG[d as DietaryType]?.icon}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    <div className={`w-28 h-28 flex-shrink-0 rounded-xl overflow-hidden relative shadow-inner ${theme === 'dark' ? 'bg-slate-800' : 'bg-gray-100'}`}>
+                      {item.image ? (
+                        <img src={item.image} alt={item.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-gray-400"><Utensils size={24} /></div>
+                      )}
+                    </div>
+                 </div>
+              )))}
           </div>
 
           {/* Pro Features FABs */}
@@ -605,6 +631,7 @@ const PublicMenu: React.FC<PublicMenuProps> = ({ data, onBack, onInteraction }) 
 
   return (
     <>
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
       {renderTheme()}
       
       <ItemDetailModal />
