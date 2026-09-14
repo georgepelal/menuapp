@@ -5,7 +5,7 @@ import {
   Search, Utensils, ArrowLeft, Share2, Globe, Check, Megaphone, Star, Zap, Activity, X, 
   ChevronDown, Info, BellRing, Gift, MessageSquare, ThumbsUp, Coffee, AlertTriangle
 } from '../ui/Icons';
-import { ToastContainer, ToastMessage, ToastType } from '../ui/Toast';
+import { useToast } from '../../contexts/ToastContext';
 
 interface PublicMenuProps {
   data: AppState;
@@ -92,17 +92,8 @@ const PublicMenu: React.FC<PublicMenuProps> = ({ data, onBack, onInteraction }) 
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [feedbackRating, setFeedbackRating] = useState(0);
   const [feedbackComment, setFeedbackComment] = useState('');
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const { addToast } = useToast();
 
-  const addToast = (type: ToastType, message: string) => {
-    const id = Date.now().toString();
-    setToasts(prev => [...prev, { id, type, message }]);
-  };
-
-  const removeToast = (id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  };
-  
   const hasViewedRef = useRef(false);
 
   useEffect(() => {
@@ -631,7 +622,6 @@ const PublicMenu: React.FC<PublicMenuProps> = ({ data, onBack, onInteraction }) 
 
   return (
     <>
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
       {renderTheme()}
       
       <ItemDetailModal />

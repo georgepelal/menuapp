@@ -38,9 +38,9 @@ const SocialAuth: React.FC<SocialAuthProps> = ({ mode, onSocialAuth, isLoading }
 
         <button
           type="button"
-          disabled={isLoading}
-          onClick={() => onSocialAuth('apple')}
-          className="flex items-center justify-center gap-2 bg-slate-900 text-white border border-slate-900 py-2.5 rounded-xl hover:bg-slate-800 transition-all active:scale-[0.98] shadow-sm"
+          disabled
+          title="Apple Sign-In is coming soon"
+          className="flex items-center justify-center gap-2 bg-slate-900/50 text-white/60 border border-slate-900/50 py-2.5 rounded-xl cursor-not-allowed shadow-sm"
         >
           <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
             <path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.74 1.18 0 2.45-1.02 3.9-1.02 1.29.05 2.54.55 3.35 1.53-2.9 1.83-2.43 5.75.83 7.23-.55 1.54-1.4 3.09-3.16 4.49zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.17 2.37-2.22 4.23-3.74 4.25z" />

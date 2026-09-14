@@ -109,9 +109,34 @@ export interface AppState {
   feedback: CustomerFeedback[];
 }
 
-export interface User {
+export type UserRole = 'owner' | 'super_admin';
+
+export interface Profile {
+  id: string;
   email: string;
-  name: string; // Business/Venue name
+  role: UserRole;
+  displayName: string | null;
 }
 
-export type ViewMode = 'landing' | 'login' | 'register' | 'admin' | 'public' | 'super-admin';
+export interface Business {
+  id: string;
+  ownerId: string;
+  slug: string;
+  name: string;
+  type?: string | null;
+  description: string;
+  currency: string;
+  themeColor: string;
+  themeTemplate: ThemeTemplate;
+  logoUrl?: string | null;
+  wifiSsid?: string | null;
+  wifiPassword?: string | null;
+  primaryLanguage: string;
+  languages: Language[];
+  promotion?: Promotion | null;
+  enableSmartWaiter: boolean;
+  enableLeadCapture: boolean;
+  enableFeedback: boolean;
+  googleReviewUrl?: string | null;
+  isPublished: boolean;
+}

@@ -1,20 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { AppState, MenuCategory, MenuItem, DietaryType, BusinessProfile, Language, ThemeTemplate, DIETARY_CONFIG, CustomerLead, ServiceRequest, CustomerFeedback } from '../../types';
-import { generateMenuDescription, generateMenuImage, translateMenu, translateMenuItem, parseMenuFromImage, generateMarketingCopy } from '../../services/geminiService';
-import { 
-  Plus, Trash2, Edit2, Sparkles, Settings, 
-  QrCode, Utensils, ImageIcon, X, Check, Menu, Upload, Globe, Languages as LanguagesIcon, LogOut,
-  Eye, EyeOff, FileText, ChevronDown, Camera, Smartphone, Palette, Store, Megaphone, Zap,
-  BarChart3, TrendingUp, Award, PieChart, Bell, Gift, MessageSquare, ClipboardList, Download, Timer, Star, User, Info, AlertTriangle
+import React, { useState, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { MenuItem, DietaryType, BusinessProfile, Language, ThemeTemplate, DIETARY_CONFIG } from '../../types';
+import { generateMenuDescription, generateMenuImage, translateMenu, parseMenuFromImage, generateMarketingCopy } from '../../services/geminiService';
+import { base64ToBlob } from '../../services/supabaseData';
+import {
+  Plus, Trash2, Edit2, Sparkles, Settings,
+  QrCode, Utensils, ImageIcon, X, Check, Menu, Upload, Globe, LogOut,
+  Eye, EyeOff, Camera, Palette, Store, Megaphone,
+  BarChart3, Bell, Gift, MessageSquare, Download, Timer, Star, User
 } from '../ui/Icons';
-import { ToastContainer, ToastMessage, ToastType } from '../ui/Toast';
-
-interface AdminDashboardProps {
-  data: AppState;
-  onUpdate: (newData: AppState) => void;
-  onPreview: () => void;
-  onLogout: () => void;
-}
+import { useAuth } from '../../contexts/AuthContext';
+import { useToast } from '../../contexts/ToastContext';
+import { useBusinessData } from '../../hooks/useBusinessData';
+import BusinessSwitcher from './BusinessSwitcher';
+import QRModal from './QRModal';
 
 const AVAILABLE_LANGUAGES: Language[] = [
   { code: 'es', name: 'Spanish', flag: '🇪🇸' },
@@ -34,138 +33,132 @@ const THEMES: {id: ThemeTemplate, name: string, desc: string, bg: string}[] = [
   { id: 'dark', name: 'Dark Mode', desc: 'Sleek dark theme', bg: 'bg-slate-900 text-white' },
 ];
 
-const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPreview, onLogout }) => {
+const AdminDashboard: React.FC = () => {
+  const { user, activeBusiness, signOut } = useAuth();
+  const { addToast } = useToast();
+  const navigate = useNavigate();
+  const {
+    data,
+    isLoading,
+    addCategory: addCategoryMutation,
+    renameCategory,
+    deleteCategory: deleteCategoryMutation,
+    saveItem: saveItemMutation,
+    deleteItem: deleteItemMutation,
+    toggleAvailability: toggleAvailabilityMutation,
+    mergeTranslations,
+    importScannedMenu,
+    uploadImage,
+    updateProfileField,
+    completeServiceRequest,
+  } = useBusinessData(activeBusiness);
+
   const [activeTab, setActiveTab] = useState<'menu' | 'settings' | 'design' | 'marketing' | 'insights' | 'crm' | 'operations' | 'account'>('menu');
   const [editingItem, setEditingItem] = useState<Partial<MenuItem> | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalLang, setModalLang] = useState<string>(data.profile.primaryLanguage);
+  const [modalLang, setModalLang] = useState<string>(data?.profile.primaryLanguage ?? 'en');
+  const [isQrOpen, setIsQrOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [currentUser, setCurrentUser] = useState<{email: string, name: string} | null>(null);
-  
-  // UI State
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  const addToast = (type: ToastType, message: string) => {
-    const id = Date.now().toString();
-    setToasts(prev => [...prev, { id, type, message }]);
-  };
-
-  const removeToast = (id: string) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  };
-
-  useEffect(() => {
-    const session = localStorage.getItem('gourmet_qr_session');
-    if (session) {
-      setCurrentUser(JSON.parse(session));
-    }
-  }, []);
-  
-  // Bulk Upload State
-  const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
-  const [csvData, setCsvData] = useState<{ headers: string[], rows: string[][] } | null>(null);
-  const [columnMapping, setColumnMapping] = useState({ name: '', description: '', price: '', category: '' });
-  const bulkFileInputRef = useRef<HTMLInputElement>(null);
-
-  // Scan Menu State
   const [isScanMenuOpen, setIsScanMenuOpen] = useState(false);
   const [scanImage, setScanImage] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const scanInputRef = useRef<HTMLInputElement>(null);
-  
-  // AI State
+
   const [isGeneratingText, setIsGeneratingText] = useState(false);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const [aiPromptIngredients, setAiPromptIngredients] = useState('');
-  
-  // Marketing State
+
   const [promoInput, setPromoInput] = useState('');
   const [isGeneratingPromo, setIsGeneratingPromo] = useState(false);
 
-  // Local state for categories to avoid full re-renders on simple inputs
-  const [categories, setCategories] = useState<MenuCategory[]>(data.categories);
-  const [items, setItems] = useState<MenuItem[]>(data.items);
+  if (isLoading || !data || !activeBusiness) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-orange-200 border-t-orange-600" />
+      </div>
+    );
+  }
 
-  useEffect(() => {
-    setCategories(data.categories);
-    setItems(data.items);
-  }, [data]);
+  const categories = data.categories;
+  const items = data.items;
 
-  const updateProfile = (field: keyof BusinessProfile, value: any) => {
-    onUpdate({
-      ...data,
-      profile: { ...data.profile, [field]: value }
-    });
-    addToast('success', 'Settings updated successfully');
+  const updateProfile = async (field: keyof BusinessProfile, value: any) => {
+    try {
+      await updateProfileField(field, value);
+      addToast('success', 'Settings updated successfully');
+    } catch (e: any) {
+      addToast('error', e.message || 'Failed to update settings');
+    }
   };
 
   // --- Menu Management ---
 
-  const addCategory = () => {
-    const newCat: MenuCategory = { id: Date.now().toString(), name: 'New Category', order: categories.length };
-    const newCats = [...categories, newCat];
-    setCategories(newCats);
-    onUpdate({ ...data, categories: newCats });
-    addToast('success', 'Category added');
+  const addCategory = async () => {
+    try {
+      await addCategoryMutation('New Category');
+      addToast('success', 'Category added');
+    } catch (e: any) {
+      addToast('error', e.message || 'Failed to add category');
+    }
   };
 
-  const updateCategory = (id: string, name: string) => {
-    const newCats = categories.map(c => c.id === id ? { ...c, name } : c);
-    setCategories(newCats);
-    onUpdate({ ...data, categories: newCats });
+  const updateCategory = async (id: string, name: string) => {
+    try {
+      await renameCategory(id, name);
+    } catch (e: any) {
+      addToast('error', e.message || 'Failed to rename category');
+    }
   };
 
-  const deleteCategory = (id: string) => {
-    if (confirm("Delete this category?")) {
-      const newCats = categories.filter(c => c.id !== id);
-      const newItems = items.filter(i => i.categoryId !== id);
-      setCategories(newCats);
-      setItems(newItems);
-      onUpdate({ ...data, categories: newCats, items: newItems });
+  const deleteCategory = async (id: string) => {
+    if (!confirm('Delete this category?')) return;
+    try {
+      await deleteCategoryMutation(id);
       addToast('info', 'Category deleted');
+    } catch (e: any) {
+      addToast('error', e.message || 'Failed to delete category');
     }
   };
 
   const openItemModal = (categoryId: string, item?: MenuItem) => {
     setModalLang(data.profile.primaryLanguage);
     if (item) setEditingItem({ ...item });
-    else setEditingItem({ id: Date.now().toString(), categoryId, name: '', description: '', price: 0, dietary: [], isAvailable: true, translations: {} });
+    else setEditingItem({ id: `temp-${Date.now()}`, categoryId, name: '', description: '', price: 0, dietary: [], isAvailable: true, translations: {} });
     setAiPromptIngredients('');
     setIsModalOpen(true);
   };
 
-  const saveItem = () => {
+  const saveItem = async () => {
     if (!editingItem || !editingItem.name || !editingItem.categoryId) return;
-    const newItem = editingItem as MenuItem;
-    const existingIndex = items.findIndex(i => i.id === newItem.id);
-    let newItems;
-    if (existingIndex >= 0) {
-      newItems = [...items];
-      newItems[existingIndex] = newItem;
-    } else {
-      newItems = [...items, newItem];
+    try {
+      await saveItemMutation(editingItem as MenuItem);
+      setIsModalOpen(false);
+      setEditingItem(null);
+      addToast('success', 'Item saved successfully');
+    } catch (e: any) {
+      addToast('error', e.message || 'Failed to save item');
     }
-    setItems(newItems);
-    onUpdate({ ...data, items: newItems });
-    setIsModalOpen(false);
-    setEditingItem(null);
-    addToast('success', 'Item saved successfully');
   };
 
-  const deleteItem = (id: string) => {
-    const newItems = items.filter(i => i.id !== id);
-    setItems(newItems);
-    onUpdate({ ...data, items: newItems });
-    addToast('info', 'Item deleted');
+  const deleteItem = async (id: string) => {
+    try {
+      await deleteItemMutation(id);
+      addToast('info', 'Item deleted');
+    } catch (e: any) {
+      addToast('error', e.message || 'Failed to delete item');
+    }
   };
 
-  const toggleAvailability = (item: MenuItem) => {
-      const updatedItem = { ...item, isAvailable: !item.isAvailable };
-      const newItems = items.map(i => i.id === item.id ? updatedItem : i);
-      setItems(newItems);
-      onUpdate({ ...data, items: newItems });
+  const toggleAvailability = async (item: MenuItem) => {
+    try {
+      await toggleAvailabilityMutation(item);
+    } catch (e: any) {
+      addToast('error', e.message || 'Failed to update availability');
+    }
   };
 
   const handleModalFieldChange = (field: 'name' | 'description', value: string) => {
@@ -185,20 +178,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
   const toggleDietary = (type: DietaryType) => {
     if (!editingItem) return;
     const current = editingItem.dietary || [];
-    const newDietary = current.includes(type) 
+    const newDietary = current.includes(type)
       ? current.filter(t => t !== type)
       : [...current, type];
     setEditingItem({ ...editingItem, dietary: newDietary });
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && editingItem) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setEditingItem({ ...editingItem, image: reader.result as string });
-      };
-      reader.readAsDataURL(file);
+    if (!file || !editingItem?.id) return;
+    try {
+      const ext = file.type.split('/')[1] || 'jpg';
+      const url = await uploadImage(editingItem.id, file, ext);
+      setEditingItem({ ...editingItem, image: url });
+    } catch (err: any) {
+      addToast('error', err.message || 'Failed to upload image');
     }
   };
 
@@ -218,12 +212,14 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
   };
 
   const handleGenerateImage = async () => {
-    if (!editingItem || !editingItem.name) return;
+    if (!editingItem || !editingItem.name || !editingItem.id) return;
     setIsGeneratingImage(true);
     try {
       const img = await generateMenuImage(editingItem.name, editingItem.description || '');
       if (img) {
-        setEditingItem({ ...editingItem, image: img });
+        const { blob, ext } = base64ToBlob(img);
+        const url = await uploadImage(editingItem.id, blob, ext);
+        setEditingItem({ ...editingItem, image: url });
         addToast('success', 'Image generated!');
       } else {
         addToast('error', 'Could not generate image');
@@ -235,71 +231,33 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
   };
 
   const handleTranslateMenu = async (targetLang: string) => {
-    if (confirm(`Translate entire menu to ${targetLang}? This may take a moment.`)) {
-      setIsTranslating(true);
-      try {
-        const result = await translateMenu(categories, items, targetLang);
-        
-        // Merge translations
-        const newItems = items.map(item => {
-          const trans = result.items[item.id];
-          if (trans) {
-            return {
-              ...item,
-              translations: {
-                ...item.translations,
-                [targetLang]: { name: trans.name, description: trans.description }
-              }
-            };
-          }
-          return item;
-        });
-
-        setItems(newItems);
-        onUpdate({ ...data, items: newItems });
-        addToast('success', 'Translation complete!');
-      } catch (e) {
-        addToast('error', 'Translation failed');
-      }
-      setIsTranslating(false);
+    if (!confirm(`Translate entire menu to ${targetLang}? This may take a moment.`)) return;
+    setIsTranslating(true);
+    try {
+      const result = await translateMenu(categories, items, targetLang);
+      await mergeTranslations(targetLang, result.items);
+      addToast('success', 'Translation complete!');
+    } catch (e) {
+      addToast('error', 'Translation failed');
     }
+    setIsTranslating(false);
   };
 
   const handleScanMenu = async () => {
     if (!scanImage) return;
     setIsScanning(true);
-    const extracted = await parseMenuFromImage(scanImage);
-    
-    if (extracted.length > 0) {
-      let newCats = [...categories];
-      let newItems = [...items];
-      
-      extracted.forEach(cat => {
-        const catId = Date.now().toString() + Math.random().toString().slice(2, 5);
-        newCats.push({ id: catId, name: cat.categoryName, order: newCats.length });
-        
-        cat.items.forEach(item => {
-          newItems.push({
-            id: Date.now().toString() + Math.random().toString().slice(2, 5),
-            categoryId: catId,
-            name: item.name,
-            description: item.description || '',
-            price: item.price,
-            dietary: (item.dietary || []) as DietaryType[],
-            isAvailable: true,
-            translations: {}
-          });
-        });
-      });
-
-      setCategories(newCats);
-      setItems(newItems);
-      onUpdate({ ...data, categories: newCats, items: newItems });
-      setIsScanMenuOpen(false);
-      setScanImage(null);
-      addToast('success', `Imported ${extracted.length} categories!`);
-    } else {
-      addToast('error', "Could not extract menu. Try a clearer image.");
+    try {
+      const extracted = await parseMenuFromImage(scanImage);
+      if (extracted.length > 0) {
+        await importScannedMenu(extracted);
+        setIsScanMenuOpen(false);
+        setScanImage(null);
+        addToast('success', `Imported ${extracted.length} categories!`);
+      } else {
+        addToast('error', 'Could not extract menu. Try a clearer image.');
+      }
+    } catch (e: any) {
+      addToast('error', e.message || 'Could not extract menu. Try a clearer image.');
     }
     setIsScanning(false);
   };
@@ -318,42 +276,52 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
   const handleMarketingCopy = async () => {
     if (!promoInput) return;
     setIsGeneratingPromo(true);
-    const copy = await generateMarketingCopy(promoInput, data.profile.primaryLanguage === 'el' ? 'Greek' : 'English');
-    updateProfile('promotion', { 
-      isActive: true, 
-      title: copy.title, 
-      description: copy.description, 
-      type: 'special' 
-    });
+    try {
+      const copy = await generateMarketingCopy(promoInput, data.profile.primaryLanguage === 'el' ? 'Greek' : 'English');
+      await updateProfile('promotion', {
+        isActive: true,
+        title: copy.title,
+        description: copy.description,
+        type: 'special'
+      });
+      addToast('success', 'Marketing banner created!');
+    } catch (e: any) {
+      addToast('error', e.message || 'Failed to create banner');
+    }
     setIsGeneratingPromo(false);
-    addToast('success', 'Marketing banner created!');
   };
 
   // --- Operations & CRM ---
 
-  const handleCompleteRequest = (reqId: string) => {
-    const updatedRequests = data.serviceRequests?.map(r => 
-      r.id === reqId ? { ...r, status: 'completed' as const } : r
-    );
-    onUpdate({ ...data, serviceRequests: updatedRequests });
-    addToast('success', 'Request marked as completed');
+  const handleCompleteRequest = async (reqId: string) => {
+    try {
+      await completeServiceRequest(reqId);
+      addToast('success', 'Request marked as completed');
+    } catch (e: any) {
+      addToast('error', e.message || 'Failed to update request');
+    }
   };
 
   const exportLeadsToCSV = () => {
     const leads = data.leads || [];
-    if (leads.length === 0) return alert("No leads to export");
-    
+    if (leads.length === 0) { addToast('info', 'No leads to export'); return; }
+
     const headers = "Name,Email,Date,Source\n";
-    const rows = leads.map(l => 
+    const rows = leads.map(l =>
       `"${l.name || ''}","${l.email}","${new Date(l.date).toLocaleDateString()}","${l.source}"`
     ).join("\n");
-    
+
     const blob = new Blob([headers + rows], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `leads-${data.profile.name}.csv`;
     a.click();
+  };
+
+  const handleLogout = async () => {
+    await signOut();
+    navigate('/');
   };
 
   // --- Renderers ---
@@ -366,13 +334,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
             <div className="flex justify-between items-center flex-wrap gap-4">
               <h2 className="text-2xl font-bold text-slate-800">Menu Manager</h2>
               <div className="flex gap-2">
-                <button 
+                <button
                   onClick={() => setIsScanMenuOpen(true)}
                   className="flex items-center gap-2 bg-purple-600 text-white border border-purple-700 px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors shadow-sm"
                 >
                   <Camera size={18} /> Scan Photo
                 </button>
-                <button 
+                <button
                   onClick={addCategory}
                   className="flex items-center gap-2 bg-slate-900 text-white px-4 py-2 rounded-lg hover:bg-slate-700 transition-colors"
                 >
@@ -390,13 +358,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                   <h3 className="text-xl font-bold text-slate-800 mb-2">Start Your Menu</h3>
                   <p className="text-slate-500 mb-6 max-w-md mx-auto">Create your first category manually or scan a photo of your physical menu to get started instantly.</p>
                   <div className="flex justify-center gap-3">
-                    <button 
+                    <button
                       onClick={addCategory}
                       className="bg-slate-900 text-white px-6 py-2 rounded-lg hover:bg-slate-800 transition-colors font-medium"
                     >
                       Create Category
                     </button>
-                    <button 
+                    <button
                       onClick={() => setIsScanMenuOpen(true)}
                       className="bg-purple-50 text-purple-600 border border-purple-200 px-6 py-2 rounded-lg hover:bg-purple-100 transition-colors font-medium"
                     >
@@ -408,19 +376,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                 categories.map((category) => (
                 <div key={category.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
                   <div className="bg-slate-50 p-4 border-b border-gray-100 flex justify-between items-center">
-                    <input 
+                    <input
                       className="bg-transparent font-bold text-lg text-slate-800 focus:outline-none focus:border-b-2 border-orange-500"
                       value={category.name}
                       onChange={(e) => updateCategory(category.id, e.target.value)}
                     />
-                    <button 
+                    <button
                       onClick={() => deleteCategory(category.id)}
                       className="text-slate-400 hover:text-red-500 transition-colors"
                     >
                       <Trash2 size={18} />
                     </button>
                   </div>
-                  
+
                   <div className="p-4 space-y-3">
                     {items.filter(item => item.categoryId === category.id).map(item => (
                       <div key={item.id} className={`flex items-center gap-4 p-3 bg-white border border-gray-100 rounded-lg hover:shadow-md transition-shadow group ${!item.isAvailable ? 'opacity-60 bg-gray-50' : ''}`}>
@@ -441,19 +409,19 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                             <p className="text-sm text-slate-500 line-clamp-1">{item.description}</p>
                           </div>
                           <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button 
+                            <button
                               onClick={(e) => { e.stopPropagation(); toggleAvailability(item); }}
                               className={`p-2 rounded-full ${item.isAvailable ? 'text-green-600 hover:bg-green-50' : 'text-slate-500 bg-slate-200 hover:bg-slate-300'}`}
                             >
                               {item.isAvailable ? <Eye size={16} /> : <EyeOff size={16} />}
                             </button>
-                            <button 
+                            <button
                               onClick={() => openItemModal(category.id, item)}
                               className="p-2 text-blue-600 hover:bg-blue-50 rounded-full"
                             >
                               <Edit2 size={16} />
                             </button>
-                            <button 
+                            <button
                               onClick={() => deleteItem(item.id)}
                               className="p-2 text-red-600 hover:bg-red-50 rounded-full"
                             >
@@ -463,7 +431,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                       </div>
                     ))}
 
-                    <button 
+                    <button
                       onClick={() => openItemModal(category.id)}
                       className="w-full py-3 border-2 border-dashed border-gray-200 rounded-lg text-slate-400 font-medium hover:border-orange-200 hover:text-orange-500 transition-colors flex items-center justify-center gap-2"
                     >
@@ -476,10 +444,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
           </div>
         );
 
-      case 'operations':
+      case 'operations': {
         const requests = data.serviceRequests || [];
         const pendingRequests = requests.filter(r => r.status === 'pending');
-        const completedRequests = requests.filter(r => r.status === 'completed');
         return (
           <div className="max-w-4xl mx-auto space-y-6">
              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
@@ -490,8 +457,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                    <label className="flex items-center gap-2 cursor-pointer">
                       <span className="text-sm font-medium text-slate-600">Smart Waiter</span>
                       <div className="relative">
-                         <input 
-                           type="checkbox" 
+                         <input
+                           type="checkbox"
                            className="sr-only peer"
                            checked={data.profile.enableSmartWaiter}
                            onChange={(e) => updateProfile('enableSmartWaiter', e.target.checked)}
@@ -519,7 +486,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                                <Timer size={12} /> {Math.floor((Date.now() - req.timestamp) / 1000 / 60)} mins ago
                             </span>
                          </div>
-                         <button 
+                         <button
                            onClick={() => handleCompleteRequest(req.id)}
                            className="bg-slate-100 hover:bg-green-100 hover:text-green-700 p-3 rounded-full transition-colors"
                          >
@@ -532,8 +499,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
              </div>
           </div>
         );
+      }
 
-      case 'crm':
+      case 'crm': {
         const leads = data.leads || [];
         return (
           <div className="max-w-4xl mx-auto space-y-6">
@@ -552,8 +520,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                       <label className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-2 rounded-lg border border-gray-200">
                          <span className="text-xs font-bold text-slate-600">Pop-up Active</span>
                          <div className="relative">
-                            <input 
-                              type="checkbox" 
+                            <input
+                              type="checkbox"
                               className="sr-only peer"
                               checked={data.profile.enableLeadCapture}
                               onChange={(e) => updateProfile('enableLeadCapture', e.target.checked)}
@@ -610,11 +578,12 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
              </div>
           </div>
         );
+      }
 
-      case 'insights':
+      case 'insights': {
         const feedback = data.feedback || [];
-        const avgRating = feedback.length > 0 
-           ? (feedback.reduce((acc, curr) => acc + curr.rating, 0) / feedback.length).toFixed(1) 
+        const avgRating = feedback.length > 0
+           ? (feedback.reduce((acc, curr) => acc + curr.rating, 0) / feedback.length).toFixed(1)
            : '0.0';
 
         return (
@@ -648,7 +617,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                          <p className="text-xs text-slate-400">{feedback.length} reviews</p>
                       </div>
                    </div>
-                   
+
                    <div className="space-y-3">
                       {feedback.slice(0, 3).map(f => (
                          <div key={f.id} className="bg-gray-50 p-3 rounded-lg text-sm">
@@ -663,13 +632,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                    </div>
                 </div>
              </div>
-             
+
              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
                 <h3 className="font-bold text-slate-800 mb-4">Reputation Management</h3>
                 <div className="flex items-center gap-4">
                    <div className="flex-1">
                       <label className="block text-sm font-medium text-slate-700 mb-1">Google Maps Review Link</label>
-                      <input 
+                      <input
                         placeholder="https://g.page/r/..."
                         value={data.profile.googleReviewUrl || ''}
                         onChange={(e) => updateProfile('googleReviewUrl', e.target.value)}
@@ -680,8 +649,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                    <label className="flex items-center gap-2 cursor-pointer mt-5">
                        <span className="text-sm font-bold text-slate-600">Active</span>
                        <div className="relative">
-                          <input 
-                            type="checkbox" 
+                          <input
+                            type="checkbox"
                             className="sr-only peer"
                             checked={data.profile.enableFeedback}
                             onChange={(e) => updateProfile('enableFeedback', e.target.checked)}
@@ -694,6 +663,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
              </div>
           </div>
         );
+      }
 
       case 'settings':
         return (
@@ -702,41 +672,41 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Business Name</label>
-                <input 
-                  value={data.profile.name} 
-                  onChange={(e) => updateProfile('name', e.target.value)} 
+                <input
+                  value={data.profile.name}
+                  onChange={(e) => updateProfile('name', e.target.value)}
                   className="w-full p-2 border border-gray-300 rounded-lg"
                 />
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                <textarea 
-                  value={data.profile.description} 
-                  onChange={(e) => updateProfile('description', e.target.value)} 
+                <textarea
+                  value={data.profile.description}
+                  onChange={(e) => updateProfile('description', e.target.value)}
                   className="w-full p-2 border border-gray-300 rounded-lg h-24"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Currency Symbol</label>
-                  <input 
-                    value={data.profile.currency} 
-                    onChange={(e) => updateProfile('currency', e.target.value)} 
+                  <input
+                    value={data.profile.currency}
+                    onChange={(e) => updateProfile('currency', e.target.value)}
                     className="w-full p-2 border border-gray-300 rounded-lg"
                   />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Primary Language</label>
-                  <select 
-                    value={data.profile.primaryLanguage} 
-                    onChange={(e) => updateProfile('primaryLanguage', e.target.value)} 
+                  <select
+                    value={data.profile.primaryLanguage}
+                    onChange={(e) => updateProfile('primaryLanguage', e.target.value)}
                     className="w-full p-2 border border-gray-300 rounded-lg"
                   >
                     {AVAILABLE_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.flag} {l.name}</option>)}
                   </select>
                 </div>
               </div>
-              
+
               <div className="pt-4 border-t border-gray-100">
                 <h3 className="font-bold text-slate-800 mb-3">Supported Languages</h3>
                 <div className="flex flex-wrap gap-2">
@@ -746,7 +716,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                       <button
                         key={lang.code}
                         onClick={() => {
-                          const newLangs = isSelected 
+                          const newLangs = isSelected
                             ? data.profile.languages.filter(l => l.code !== lang.code)
                             : [...data.profile.languages, lang];
                           updateProfile('languages', newLangs);
@@ -759,6 +729,24 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                   })}
                 </div>
               </div>
+
+              {data.profile.languages.length > 1 && (
+                <div className="pt-4 border-t border-gray-100">
+                  <h3 className="font-bold text-slate-800 mb-3">Translate Menu</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {data.profile.languages.filter(l => l.code !== data.profile.primaryLanguage).map(lang => (
+                      <button
+                        key={lang.code}
+                        onClick={() => handleTranslateMenu(lang.code)}
+                        disabled={isTranslating}
+                        className="px-3 py-1.5 rounded-full text-sm border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                      >
+                        {isTranslating ? 'Translating...' : `Translate to ${lang.name}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         );
@@ -767,10 +755,10 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
         return (
           <div className="max-w-4xl mx-auto space-y-6">
             <h2 className="text-2xl font-bold text-slate-800">Menu Design</h2>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {THEMES.map(theme => (
-                <div 
+                <div
                   key={theme.id}
                   onClick={() => updateProfile('themeTemplate', theme.id)}
                   className={`cursor-pointer rounded-xl border-2 p-4 transition-all ${data.profile.themeTemplate === theme.id ? 'border-orange-500 ring-4 ring-orange-500/10' : 'border-gray-200 hover:border-gray-300'}`}
@@ -802,16 +790,16 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                  <Megaphone className="text-pink-500" /> Marketing Banner
                </h2>
                <p className="text-slate-500 mb-6">Create a promotional banner that appears at the top of your menu.</p>
-               
+
                <div className="space-y-4">
                   <div className="flex gap-2">
-                    <input 
+                    <input
                       value={promoInput}
                       onChange={(e) => setPromoInput(e.target.value)}
                       placeholder="e.g. Happy Hour 5-7pm, Valentine's Special"
                       className="flex-1 p-2 border border-gray-300 rounded-lg"
                     />
-                    <button 
+                    <button
                       onClick={handleMarketingCopy}
                       disabled={isGeneratingPromo}
                       className="bg-purple-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50"
@@ -842,49 +830,27 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                <h2 className="text-2xl font-bold text-slate-800 mb-6 flex items-center gap-2">
                  <User className="text-blue-500" size={24} /> Account Profile
                </h2>
-               
+
                <div className="space-y-4">
                   <div className="flex items-center gap-4 mb-6">
                     <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center text-slate-400">
                        <User size={40} />
                     </div>
                     <div>
-                       <h3 className="font-bold text-lg text-slate-800">{currentUser?.name || 'User'}</h3>
-                       <p className="text-slate-500">{currentUser?.email}</p>
-                       <span className="inline-block mt-2 px-2 py-1 bg-green-100 text-green-700 text-xs font-bold rounded">Pro Plan Active</span>
+                       <h3 className="font-bold text-lg text-slate-800">{activeBusiness.name}</h3>
+                       <p className="text-slate-500">{user?.email}</p>
                     </div>
                   </div>
 
                   <div>
                      <label className="block text-sm font-medium text-slate-700 mb-1">Email Address</label>
-                     <input 
-                       value={currentUser?.email || ''} 
+                     <input
+                       value={user?.email || ''}
                        disabled
                        className="w-full p-2 border border-gray-200 rounded-lg bg-gray-50 text-slate-500"
                      />
                   </div>
-                  
-                  <div className="pt-4 border-t border-gray-100">
-                     <h3 className="font-bold text-slate-800 mb-4">Security</h3>
-                     <button className="text-blue-600 font-medium text-sm hover:underline">Change Password</button>
-                  </div>
                </div>
-            </div>
-
-            <div className="bg-white rounded-xl shadow-sm border border-red-100 p-6">
-               <h3 className="font-bold text-red-600 mb-2">Danger Zone</h3>
-               <p className="text-sm text-slate-500 mb-4">Permanently delete your account and all data.</p>
-               <button 
-                 onClick={() => {
-                   if(confirm('Are you sure? This cannot be undone.')) {
-                     // In a real app, this would call an API
-                     alert('Please contact support to delete your account.');
-                   }
-                 }}
-                 className="px-4 py-2 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50"
-               >
-                 Delete Account
-               </button>
             </div>
           </div>
         );
@@ -896,8 +862,6 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row relative">
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
-      
       {/* Mobile Header */}
       <div className="md:hidden bg-slate-900 text-white p-4 flex justify-between items-center sticky top-0 z-20">
         <div className="flex items-center gap-2">
@@ -918,7 +882,9 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
           <Store className="text-orange-500" size={24} />
           <h1 className="text-xl font-bold">GourmetQR</h1>
         </div>
-        
+
+        <BusinessSwitcher />
+
         <nav className="flex-1 space-y-2">
           <button onClick={() => { setActiveTab('menu'); setIsMobileMenuOpen(false); }} className={`w-full text-left px-4 py-3 rounded-lg flex items-center gap-3 transition-colors ${activeTab === 'menu' ? 'bg-orange-600 text-white' : 'text-slate-400 hover:bg-slate-800'}`}>
             <Utensils size={18} /> Menu Manager
@@ -947,21 +913,21 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
         </nav>
 
         <div className="mt-auto pt-6 border-t border-slate-700 space-y-3">
-           <button 
-             onClick={onPreview}
+           <button
+             onClick={() => setIsQrOpen(true)}
              className="w-full bg-white text-slate-900 px-4 py-3 rounded-lg flex items-center justify-center gap-2 font-semibold hover:bg-gray-100 transition-colors"
            >
              <QrCode size={18} /> Preview & QR
            </button>
-           <button onClick={onLogout} className="w-full text-slate-400 hover:text-white px-4 py-2 rounded-lg flex items-center gap-3 transition-colors text-sm">
+           <button onClick={handleLogout} className="w-full text-slate-400 hover:text-white px-4 py-2 rounded-lg flex items-center gap-3 transition-colors text-sm">
              <LogOut size={16} /> Sign Out
            </button>
         </div>
       </aside>
-      
+
       {/* Overlay for mobile menu */}
       {isMobileMenuOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-20 md:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
         />
@@ -971,6 +937,13 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
         {renderContent()}
       </main>
 
+      <QRModal
+        isOpen={isQrOpen}
+        onClose={() => setIsQrOpen(false)}
+        url={`${window.location.origin}/m/${activeBusiness.slug}`}
+        businessName={activeBusiness.name}
+      />
+
       {/* Item Modal */}
       {isModalOpen && editingItem && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -979,7 +952,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                <h3 className="text-xl font-bold text-slate-800">Edit Item</h3>
                <button onClick={() => setIsModalOpen(false)}><X size={24} /></button>
              </div>
-             
+
              <div className="p-6 overflow-y-auto">
                 <div className="flex gap-4 mb-6">
                   <div className="w-32 h-32 bg-gray-100 rounded-lg flex items-center justify-center relative overflow-hidden group">
@@ -998,20 +971,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                   <div className="flex-1 space-y-4">
                      <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Name</label>
-                        <input 
-                           value={editingItem.name} 
-                           onChange={(e) => handleModalFieldChange('name', e.target.value)} 
-                           className="w-full p-2 border border-gray-300 rounded" 
+                        <input
+                           value={editingItem.name}
+                           onChange={(e) => handleModalFieldChange('name', e.target.value)}
+                           className="w-full p-2 border border-gray-300 rounded"
                            placeholder="Item Name"
                         />
                      </div>
                      <div>
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Price</label>
-                        <input 
+                        <input
                            type="number"
-                           value={editingItem.price} 
-                           onChange={(e) => setEditingItem({ ...editingItem, price: parseFloat(e.target.value) })} 
-                           className="w-full p-2 border border-gray-300 rounded" 
+                           value={editingItem.price}
+                           onChange={(e) => setEditingItem({ ...editingItem, price: parseFloat(e.target.value) })}
+                           className="w-full p-2 border border-gray-300 rounded"
                            placeholder="0.00"
                         />
                      </div>
@@ -1021,7 +994,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                 <div className="mb-6">
                    <div className="flex justify-between items-center mb-1">
                       <label className="block text-xs font-bold text-slate-500 uppercase">Description</label>
-                      <button 
+                      <button
                         onClick={handleGenerateDescription}
                         disabled={isGeneratingText || !editingItem.name}
                         className="text-xs text-purple-600 font-bold flex items-center gap-1 hover:underline disabled:opacity-50"
@@ -1029,20 +1002,20 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                         <Sparkles size={12} /> {isGeneratingText ? 'Writing...' : 'Auto-Write'}
                       </button>
                    </div>
-                   <textarea 
-                      value={editingItem.description} 
-                      onChange={(e) => handleModalFieldChange('description', e.target.value)} 
-                      className="w-full p-2 border border-gray-300 rounded h-24 text-sm" 
+                   <textarea
+                      value={editingItem.description}
+                      onChange={(e) => handleModalFieldChange('description', e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded h-24 text-sm"
                       placeholder="Describe the dish..."
                    />
                    <div className="flex gap-2 mt-2">
-                      <input 
+                      <input
                         value={aiPromptIngredients}
                         onChange={(e) => setAiPromptIngredients(e.target.value)}
                         placeholder="Ingredients for AI (e.g. fresh basil, mozzarella)"
                         className="flex-1 p-2 border border-gray-200 rounded text-xs"
                       />
-                      <button 
+                      <button
                         onClick={handleGenerateImage}
                         disabled={isGeneratingImage || !editingItem.name}
                         className="bg-purple-50 text-purple-600 px-3 py-1 rounded text-xs font-bold border border-purple-100 hover:bg-purple-100 disabled:opacity-50"
@@ -1060,8 +1033,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                            key={type}
                            onClick={() => toggleDietary(type)}
                            className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                             editingItem.dietary?.includes(type) 
-                             ? 'bg-green-100 text-green-700 border-green-200' 
+                             editingItem.dietary?.includes(type)
+                             ? 'bg-green-100 text-green-700 border-green-200'
                              : 'bg-white text-slate-500 border-gray-200'
                            }`}
                          >
@@ -1075,7 +1048,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                 <div className="border-t border-gray-100 pt-4">
                    <div className="flex justify-between items-center mb-4">
                       <h4 className="font-bold text-slate-800 flex items-center gap-2"><Globe size={16} /> Translations</h4>
-                      <select 
+                      <select
                         value={modalLang}
                         onChange={(e) => setModalLang(e.target.value)}
                         className="text-sm border border-gray-200 rounded p-1"
@@ -1108,8 +1081,8 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6">
               <h3 className="text-xl font-bold text-slate-800 mb-4">Scan Menu from Photo</h3>
               <p className="text-slate-500 text-sm mb-6">Upload a clear photo of a menu page. Our AI will extract items, prices, and descriptions automatically.</p>
-              
-              <div 
+
+              <div
                 onClick={() => scanInputRef.current?.click()}
                 className="border-2 border-dashed border-gray-300 rounded-xl h-48 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-50 hover:border-orange-400 transition-colors mb-4"
               >
@@ -1124,7 +1097,7 @@ const AdminDashboard: React.FC<AdminDashboardProps> = ({ data, onUpdate, onPrevi
                  <input ref={scanInputRef} type="file" className="hidden" accept="image/*" onChange={handleScanImageUpload} />
               </div>
 
-              <button 
+              <button
                 onClick={handleScanMenu}
                 disabled={!scanImage || isScanning}
                 className="w-full py-3 bg-purple-600 text-white rounded-xl font-bold hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
